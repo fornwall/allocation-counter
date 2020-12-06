@@ -1,7 +1,26 @@
-// #![feature(test, const_fn)]
-
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
+
+/// Run a closure while counting the performed memory allocations.
+///
+/// Will only measure those done by the current thread, so take care when
+/// interpreting the returned count for multithreaded programs.
+///
+/// Usage:
+///
+/// ```rust
+/// let allocations = allocation_counter::count(|| {
+///      "hello, world".to_string();
+/// });
+/// assert_eq!(allocations, 1);
+/// ```
+pub fn count<F: FnOnce()>(run_while_counting: F) -> u64 {
+    let initial_count = ALLOCATIONS.with(|f| *f.borrow());
+
+    run_while_counting();
+
+    ALLOCATIONS.with(|f| *f.borrow()) - initial_count
+}
 
 thread_local! {
     static ALLOCATIONS: RefCell<u64> = RefCell::new(0);
@@ -21,17 +40,6 @@ unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn dealloc(&self, ptr: *mut u8, l: Layout) {
         System.dealloc(ptr, l);
     }
-}
-
-/// Run a closure while counting the memory allocations done.
-pub fn count<F: FnOnce()>(run_while_counting: F) -> u64 {
-    ALLOCATIONS.with(|f| {
-        *f.borrow_mut() = 0;
-    });
-
-    run_while_counting();
-
-    ALLOCATIONS.with(|f| *f.borrow())
 }
 
 #[global_allocator]
