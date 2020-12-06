@@ -1,8 +1,8 @@
 [package]
 name = "allocation-counter"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Fredrik Fornwall <fredrik@fornwall.net>"]
-description = "Run some code while counting the memory allocation it doese."
+description = "Count the number of memory allocation of some code."
 edition = "2018"
 readme = "README.md"
 license = "MIT/Apache-2.0"
