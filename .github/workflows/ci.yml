@@ -1,0 +1,8 @@
+name: CI
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    - uses: actions/checkout@v2
+    - uses: hecrj/setup-rust-action@v1
+    - run: make check
