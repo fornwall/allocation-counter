@@ -3,10 +3,12 @@
 
 
 # allocation-counter
-Run some Rust code while counting allocations.
+Run some Rust code while counting allocations. Can be used to assert that the desired amount of memory allocations is not exceeded in tests.
+
+It works by replacing the System allocator with a custom one which increases a thread local counter on each memory allocation before delegating to the normal system allocator.
 
 # Example usage:
-Add as a dependency:
+Add as a dependency - since including the trait replaces the global memory allocator, you most likely want it gated behind a feature:
 
 ```toml
 [features]
@@ -16,7 +18,7 @@ count-allocations = ["allocation-counter"]
 allocation-counter = { version = "0", optional = true }
 ```
 
-Since including the trait replaces the global memory allocator, you most likely want it gated behind a feature.
+Tests can now be written to assert that the number of desired memory allocations are not exceeded:
 
 ```rust
 #[cfg(feature = "count-allocations")]
@@ -29,7 +31,7 @@ pub fn no_memory_allocations() {
 }
 ```
 
-You can now assert that the function does not allocate memory by running tests with the necessary feature enabled:
+Run the tests with the necessary feature enable:
 
 ```sh
 cargo test --features count-allocations
