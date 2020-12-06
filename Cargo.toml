@@ -1,6 +1,6 @@
 [package]
 name = "allocation-counter"
-version = "0.3.0"
+version = "0.4.0"
 authors = ["Fredrik Fornwall <fredrik@fornwall.net>"]
 categories = ["development-tools", "memory-management"]
 description = "Count the number of memory allocation of some code."
