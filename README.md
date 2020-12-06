@@ -31,7 +31,7 @@ pub fn no_memory_allocations() {
 }
 ```
 
-Run the tests with the necessary feature enable:
+Run the tests with the necessary feature enabled:
 
 ```sh
 cargo test --features count-allocations
