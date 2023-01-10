@@ -48,25 +48,21 @@ static GLOBAL: CountingAllocator = CountingAllocator {};
 #[test]
 fn test_closure() {
     let allocations = count(|| {
-        let mut v: Vec<u32> = Vec::new();
-        v.push(12);
+        let v: Vec<u32> = vec![12];
         assert_eq!(v.len(), 1);
     });
     assert_eq!(allocations, 1);
 
     let allocations = count(|| {
-        let mut v: Vec<u32> = Vec::new();
-        v.push(12);
+        let v: Vec<u32> = vec![12];
         assert_eq!(v.len(), 1);
     });
     assert_eq!(allocations, 1);
 
     let allocations = count(|| {
-        let mut v: Vec<u32> = Vec::new();
-        v.push(12);
+        let v: Vec<u32> = vec![12];
         assert_eq!(v.len(), 1);
-        let mut v: Vec<u32> = Vec::new();
-        v.push(12);
+        let v: Vec<u32> = vec![12];
         assert_eq!(v.len(), 1);
     });
     assert_eq!(allocations, 2);
