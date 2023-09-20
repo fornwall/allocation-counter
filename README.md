@@ -28,6 +28,32 @@ pub fn no_memory_allocations() {
         code_that_should_not_allocate_memory();
     });
     assert_eq!(allocations, 0);
+
+    // Or use this utility method in this case:
+    allocation_counter::assert_no_allocations(|| {
+        code_that_should_not_allocate_memory();
+    });
+
+    // Can also allow a certain number of allocations:
+    allocation_counter::assert_max_allocations(10 || {
+        code_that_should_not_allocate_much();
+    });
+
+    // Can also assert on a range, useful to adjust
+    // test expectations over time:
+    allocation_counter::assert_num_allocations(500..600 || {
+        code_that_should_not_allocate_much();
+    });
+
+    // It's possible to opt out of counting allocations
+    // for certain parts of the code flow:
+    allocation_counter::assert_no_allocations(|| {
+        code_that_should_not_allocate();
+        allocation_counter::avoid_counting(|| {
+            external_code_that_should_not_be_tested();
+        });
+        code_that_should_not_allocate();
+    });
 }
 ```
 
