@@ -1,3 +1,36 @@
+/*!
+This crate provides a method to count allocations while running some code.
+
+# Example
+Add as a dependency - since including the trait replaces the global memory allocator, you most likely want it gated behind a feature:
+
+```toml
+[features]
+count-allocations = ["allocation-counter"]
+
+[dependencies]
+allocation-counter = { version = "0", optional = true }
+```
+
+Tests can now be written to assert that the number of desired memory allocations are not exceeded:
+
+```
+#[cfg(feature = "count-allocations")]
+#[test]
+pub fn no_memory_allocations() {
+    let allocations = allocation_counter::count(|| {
+        code_that_should_not_allocate_memory();
+    });
+    assert_eq!(allocations, 0);
+}
+```
+
+Run the tests with the necessary feature enabled:
+
+```sh
+cargo test --features count-allocations
+```
+*/
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 
@@ -6,9 +39,13 @@ use std::cell::RefCell;
 /// Will only measure those done by the current thread, so take care when
 /// interpreting the returned count for multithreaded programs.
 ///
-/// Usage:
+/// # Arguments
 ///
-/// ```rust
+/// - `run_while_counting` - The code to run while counting allocations
+///
+/// # Examples
+///
+/// ```
 /// let allocations = allocation_counter::count(|| {
 ///      "hello, world".to_string();
 /// });
@@ -47,6 +84,11 @@ static GLOBAL: CountingAllocator = CountingAllocator {};
 
 #[test]
 fn test_closure() {
+    let allocations = count(|| {
+        // Do nothing.
+    });
+    assert_eq!(allocations, 0);
+
     let allocations = count(|| {
         let v: Vec<u32> = vec![12];
         assert_eq!(v.len(), 1);
