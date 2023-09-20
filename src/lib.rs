@@ -59,8 +59,8 @@ Run the tests with the necessary feature enabled.
 cargo test --features count-allocations
 ```
 */
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::RefCell;
+
+mod allocator;
 
 /// Run a closure while counting the performed memory allocations.
 ///
@@ -81,11 +81,40 @@ use std::cell::RefCell;
 /// assert_eq!(allocations, 1);
 /// ```
 pub fn count<F: FnOnce()>(run_while_counting: F) -> u64 {
-    let initial_count = ALLOCATIONS.with(|f| *f.borrow());
+    let initial_count = allocator::ALLOCATIONS.with(|f| *f.borrow());
 
     run_while_counting();
 
-    ALLOCATIONS.with(|f| *f.borrow()) - initial_count
+    allocator::ALLOCATIONS.with(|f| *f.borrow()) - initial_count
+}
+
+/// Opt out of counting allocations while running some code.
+///
+/// Useful to avoid certain parts of the code flow that should not be counted.
+///
+/// # Arguments
+///
+/// - `run_while_not_counting` - The code to run while not counting allocations
+///
+/// # Examples
+///
+/// ```
+/// # fn code_that_should_not_allocate() {}
+/// # fn external_code_that_should_not_be_tested() {}
+/// allocation_counter::assert_no_allocations(|| {
+///     code_that_should_not_allocate();
+///     allocation_counter::avoid_counting(|| {
+///         external_code_that_should_not_be_tested();
+///     });
+///     code_that_should_not_allocate();
+/// });
+/// ```
+pub fn avoid_counting<F: FnOnce()>(run_while_not_counting: F) {
+    allocator::DO_COUNT.with(|b| {
+        *b.borrow_mut() += 1;
+        run_while_not_counting();
+        *b.borrow_mut() -= 1;
+    });
 }
 
 /// Run a closure and assert that no memory allocations were made.
@@ -128,11 +157,11 @@ pub fn assert_no_allocations<F: FnOnce()>(run_while_counting: F) {
 /// });
 /// ```
 pub fn assert_max_allocations<F: FnOnce()>(max_allocations: u64, run_while_counting: F) {
-    let initial_count = ALLOCATIONS.with(|f| *f.borrow());
+    let initial_count = allocator::ALLOCATIONS.with(|f| *f.borrow());
 
     run_while_counting();
 
-    let num_allocations = ALLOCATIONS.with(|f| *f.borrow()) - initial_count;
+    let num_allocations = allocator::ALLOCATIONS.with(|f| *f.borrow()) - initial_count;
     assert!(
         num_allocations <= max_allocations,
         "Unexpected memory allocations (more than {}): {}",
@@ -163,11 +192,11 @@ pub fn assert_num_allocations<F: FnOnce()>(
     allowed_allocations: std::ops::Range<u64>,
     run_while_counting: F,
 ) {
-    let initial_count = ALLOCATIONS.with(|f| *f.borrow());
+    let initial_count = allocator::ALLOCATIONS.with(|f| *f.borrow());
 
     run_while_counting();
 
-    let num_allocations = ALLOCATIONS.with(|f| *f.borrow()) - initial_count;
+    let num_allocations = allocator::ALLOCATIONS.with(|f| *f.borrow()) - initial_count;
     assert!(
         allowed_allocations.contains(&num_allocations),
         "Unexpected memory allocations (outside of {:?}): {}",
@@ -175,65 +204,6 @@ pub fn assert_num_allocations<F: FnOnce()>(
         num_allocations
     );
 }
-
-/// Opt out of counting allocations while running some code.
-///
-/// Useful to avoid certain parts of the code flow that should not be counted.
-///
-/// # Arguments
-///
-/// - `run_while_not_counting` - The code to run while not counting allocations
-///
-/// # Examples
-///
-/// ```
-/// # fn code_that_should_not_allocate() {}
-/// # fn external_code_that_should_not_be_tested() {}
-/// allocation_counter::assert_no_allocations(|| {
-///     code_that_should_not_allocate();
-///     allocation_counter::avoid_counting(|| {
-///         external_code_that_should_not_be_tested();
-///     });
-///     code_that_should_not_allocate();
-/// });
-/// ```
-pub fn avoid_counting<F: FnOnce()>(run_while_not_counting: F) {
-    DO_COUNT.with(|b| {
-        *b.borrow_mut() += 1;
-        run_while_not_counting();
-        *b.borrow_mut() -= 1;
-    });
-}
-
-thread_local! {
-    static ALLOCATIONS: RefCell<u64> = RefCell::new(0);
-}
-thread_local! {
-    static DO_COUNT: RefCell<u32> = RefCell::new(0);
-}
-
-struct CountingAllocator;
-
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, l: Layout) -> *mut u8 {
-        DO_COUNT.with(|b| {
-            if *b.borrow() == 0 {
-                ALLOCATIONS.with(|f| {
-                    *f.borrow_mut() += 1;
-                });
-            }
-        });
-
-        System.alloc(l)
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, l: Layout) {
-        System.dealloc(ptr, l);
-    }
-}
-
-#[global_allocator]
-static GLOBAL: CountingAllocator = CountingAllocator {};
 
 #[test]
 fn test_basic() {
