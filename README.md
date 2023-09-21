@@ -3,7 +3,7 @@
 [![Build](https://github.com/fornwall/allocation-counter/workflows/CI/badge.svg)](https://github.com/fornwall/allocation-counter/actions?query=workflow%3A%22CI%22)
 
 # allocation-counter
-Rust library to run code while counting allocations. Can be used to assert that the desired amount of memory allocations is not exceeded in tests.
+Rust library to run code while counting allocations. Can be used to explore memory allocation usage, or assert that the desired amount of memory allocations is not exceeded in tests.
 
 It works by replacing the System allocator with a custom one which increases a thread local counter on each memory allocation before delegating to the normal system allocator.
 
