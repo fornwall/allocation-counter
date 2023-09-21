@@ -10,3 +10,12 @@ jobs:
     - uses: actions/checkout@v4
     - uses: dtolnay/rust-toolchain@stable
     - run: make check
+
+  test-32-bits:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: i686-unknown-linux-musl
+    - run: cargo test --target i686-unknown-linux-musl

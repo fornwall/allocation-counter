@@ -60,7 +60,33 @@ cargo test --features count-allocations
 ```
 */
 
-mod allocator;
+pub(crate) mod allocator;
+
+#[derive(Clone, Copy, Default)]
+pub struct AllocationInfo {
+    num_allocations: u64,
+    total_bytes_allocated: u64,
+    max_bytes_allocated: u64,
+    current_bytes_allocated: i64,
+}
+
+impl AllocationInfo {
+    pub const fn num_allocations(&self) -> u64 {
+        self.num_allocations
+    }
+
+    pub const fn total_bytes_allocated(&self) -> u64 {
+        self.total_bytes_allocated
+    }
+
+    pub const fn current_bytes_allocated(&self) -> i64 {
+        self.current_bytes_allocated
+    }
+
+    pub const fn max_bytes_allocated(&self) -> u64 {
+        self.max_bytes_allocated
+    }
+}
 
 /// Run a closure while counting the performed memory allocations.
 ///
@@ -81,11 +107,35 @@ mod allocator;
 /// assert_eq!(allocations, 1);
 /// ```
 pub fn count<F: FnOnce()>(run_while_counting: F) -> u64 {
-    let initial_count = allocator::ALLOCATIONS.with(|f| *f.borrow());
+    measure(run_while_counting).num_allocations()
+}
+
+pub fn measure<F: FnOnce()>(run_while_counting: F) -> AllocationInfo {
+    allocator::ALLOCATIONS.with(|info_stack| {
+        let mut info_stack = info_stack.borrow_mut();
+        info_stack.depth += 1;
+        assert!(
+            (info_stack.depth as usize) < allocator::MAX_DEPTH,
+            "Too deep allocation measuring nesting"
+        );
+        let depth = info_stack.depth;
+        info_stack.elements[depth as usize] = AllocationInfo::default();
+    });
 
     run_while_counting();
 
-    allocator::ALLOCATIONS.with(|f| *f.borrow()) - initial_count
+    allocator::ALLOCATIONS.with(|info_stack| {
+        let mut info_stack = info_stack.borrow_mut();
+        let depth = info_stack.depth;
+        let popped = info_stack.elements[depth as usize];
+        info_stack.depth -= 1;
+        let depth = info_stack.depth as usize;
+        info_stack.elements[depth].num_allocations += popped.num_allocations;
+        info_stack.elements[depth].total_bytes_allocated += popped.total_bytes_allocated;
+        info_stack.elements[depth].current_bytes_allocated += popped.current_bytes_allocated;
+        info_stack.elements[depth].max_bytes_allocated += popped.max_bytes_allocated;
+        popped
+    })
 }
 
 /// Opt out of counting allocations while running some code.
@@ -157,11 +207,7 @@ pub fn assert_no_allocations<F: FnOnce()>(run_while_counting: F) {
 /// });
 /// ```
 pub fn assert_max_allocations<F: FnOnce()>(max_allocations: u64, run_while_counting: F) {
-    let initial_count = allocator::ALLOCATIONS.with(|f| *f.borrow());
-
-    run_while_counting();
-
-    let num_allocations = allocator::ALLOCATIONS.with(|f| *f.borrow()) - initial_count;
+    let num_allocations = count(run_while_counting);
     assert!(
         num_allocations <= max_allocations,
         "Unexpected memory allocations (more than {}): {}",
@@ -192,11 +238,7 @@ pub fn assert_num_allocations<F: FnOnce()>(
     allowed_allocations: std::ops::Range<u64>,
     run_while_counting: F,
 ) {
-    let initial_count = allocator::ALLOCATIONS.with(|f| *f.borrow());
-
-    run_while_counting();
-
-    let num_allocations = allocator::ALLOCATIONS.with(|f| *f.borrow()) - initial_count;
+    let num_allocations = count(run_while_counting);
     assert!(
         allowed_allocations.contains(&num_allocations),
         "Unexpected memory allocations (outside of {:?}): {}",
@@ -211,6 +253,13 @@ fn test_basic() {
         // Do nothing.
     });
     assert_eq!(allocations, 0);
+
+    let info = measure(|| {
+        // Do nothing.
+    });
+    assert_eq!(info.num_allocations(), 0);
+    assert_eq!(info.total_bytes_allocated(), 0);
+    assert_eq!(info.current_bytes_allocated(), 0);
 
     let allocations = count(|| {
         let v: Vec<u32> = vec![12];
@@ -231,6 +280,34 @@ fn test_basic() {
         assert_eq!(v.len(), 1);
     });
     assert_eq!(allocations, 2);
+
+    let info = measure(|| {
+        let _a = std::hint::black_box(Box::new(1_u32));
+        let _b = std::hint::black_box(Box::new(1_u32));
+    });
+    assert_eq!(info.num_allocations(), 2);
+    assert_eq!(info.total_bytes_allocated(), 8);
+    assert_eq!(info.current_bytes_allocated(), 0);
+
+    let info = measure(|| {
+        let _a = std::hint::black_box(Box::new(1_u32));
+        let b = std::hint::black_box(Box::new(1_u32));
+        std::mem::forget(b);
+    });
+    assert_eq!(info.num_allocations(), 2);
+    assert_eq!(info.total_bytes_allocated(), 8);
+    assert_eq!(info.current_bytes_allocated(), 4);
+    assert_eq!(info.max_bytes_allocated, 8);
+
+    let info = measure(|| {
+        let a = std::hint::black_box(Box::new(1_u32));
+        let b = std::hint::black_box(Box::new(1_u32));
+        let _c = std::hint::black_box(Box::new(*a + *b));
+    });
+    assert_eq!(info.num_allocations(), 3);
+    assert_eq!(info.total_bytes_allocated(), 12);
+    assert_eq!(info.current_bytes_allocated(), 0);
+    assert_eq!(info.max_bytes_allocated, 12);
 
     assert_no_allocations(|| {
         // Do nothing
@@ -324,4 +401,20 @@ fn test_avoid_counting() {
             assert_eq!(v.len(), 1);
         });
     });
+}
+
+#[test]
+fn test_nested_counting() {
+    let info = measure(|| {
+        let _a = std::hint::black_box(Box::new(1_u32));
+        let info = measure(|| {
+            let _b = std::hint::black_box(Box::new(1_u32));
+        });
+        assert_eq!(info.num_allocations(), 1);
+        assert_eq!(info.total_bytes_allocated(), 4);
+        assert_eq!(info.current_bytes_allocated(), 0);
+    });
+    assert_eq!(info.num_allocations(), 2);
+    assert_eq!(info.total_bytes_allocated(), 8);
+    assert_eq!(info.current_bytes_allocated(), 0);
 }

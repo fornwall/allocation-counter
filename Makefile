@@ -34,3 +34,4 @@ check:
 	$(CARGO_COMMAND) clippy --tests $(CLIPPY_PARAMS)
 	$(CARGO_COMMAND) clippy --lib --bins $(CLIPPY_PARAMS) -D clippy::panic
 	$(CARGO_COMMAND) test
+	$(CARGO_COMMAND) test --release
