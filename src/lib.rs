@@ -15,12 +15,14 @@ allocation-counter = { version = "0", optional = true }
 The [measure()] function is now available, which can measure memory allocations made
 when the supplied function or closure runs.
 
-A test can be conditional on the feature:
+Tests can be conditional on the feature:
 
 ```
 #[cfg(feature = "count-allocations")]
 #[test]
-# {}
+{
+    // [...]
+}
 ```
 
 The test code itself could look like:
@@ -28,7 +30,6 @@ The test code itself could look like:
 ```
 # fn code_that_should_not_allocate() {}
 # fn external_code_that_should_not_be_tested() {}
-// This is the workhorse method to obtain allocation information:
 let info = allocation_counter::measure(|| {
     code_that_should_not_allocate();
 });
@@ -56,12 +57,12 @@ cargo test --features count-allocations
 pub(crate) mod allocator;
 
 /// The allocation information obtained by a [measure()] call.
-#[derive(Clone, Copy, Default, Debug)]
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash)]
 pub struct AllocationInfo {
     /// The total number of allocations made during a [measure()] call.
     pub count_total: u64,
 
-    /// The current (net result) amount of allocations during a [measure()] call.
+    /// The current (net result) number of allocations during a [measure()] call.
     ///
     /// A non-zero value of this field means that the function did not deallocate all allocations, as shown below.
     ///
@@ -74,7 +75,7 @@ pub struct AllocationInfo {
     /// ```
     pub count_current: i64,
 
-    /// The max amount of allocations held during a point in time during a [measure()] call.
+    /// The max number of allocations held during a point in time during a [measure()] call.
     pub count_max: u64,
 
     /// The total amount of bytes allocated during a [measure()] call.
@@ -125,15 +126,18 @@ impl std::ops::AddAssign for AllocationInfo {
 ///
 /// ```
 /// # fn code_that_should_not_allocate_memory() {}
-/// let info = allocation_counter::measure(|| {
+/// let actual = allocation_counter::measure(|| {
 ///      "hello, world".to_string();
 /// });
-/// assert_eq!(info.count_total, 1);
-/// assert_eq!(info.count_current, 0);
-/// assert_eq!(info.count_max, 1);
-/// assert_eq!(info.bytes_total, 12);
-/// assert_eq!(info.bytes_current, 0);
-/// assert_eq!(info.bytes_max, 12);
+/// let expected = allocation_counter::AllocationInfo {
+///     count_total: 1,
+///     count_current: 0,
+///     count_max: 1,
+///     bytes_total: 12,
+///     bytes_current: 0,
+///     bytes_max: 12,
+/// };
+/// assert_eq!(actual, expected);
 /// ```
 pub fn measure<F: FnOnce()>(run_while_measuring: F) -> AllocationInfo {
     allocator::ALLOCATIONS.with(|info_stack| {
