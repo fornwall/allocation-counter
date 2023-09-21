@@ -7,6 +7,8 @@ Rust library to run code while counting allocations. Can be used to assert that 
 
 It works by replacing the System allocator with a custom one which increases a thread local counter on each memory allocation before delegating to the normal system allocator.
 
+See the below example and the [crate documentation](https://docs.rs/allocation-counter/latest/allocation_counter/) for more information.
+
 # Example
 Add as a dependency - since including the trait replaces the global memory allocator, you most likely want it gated behind a feature:
 
@@ -24,36 +26,39 @@ Tests can now be written to assert that the number of desired memory allocations
 #[cfg(feature = "count-allocations")]
 #[test]
 pub fn no_memory_allocations() {
-    let allocations = allocation_counter::count(|| {
-        code_that_should_not_allocate_memory();
+    // Verify that no memory allocations are made:
+    let info = allocation_counter::measure(|| {
+        code_that_should_not_allocate();
     });
-    assert_eq!(allocations, 0);
+    assert_eq!(info.count_total, 0);
 
-    // Or use this utility method in this case:
-    allocation_counter::assert_no_allocations(|| {
-        code_that_should_not_allocate_memory();
-    });
-
-    // Can also allow a certain number of allocations:
-    allocation_counter::assert_max_allocations(10 || {
-        code_that_should_not_allocate_much();
+    // Let's use a case where some allocations are expected.
+    let info = allocation_counter::measure(|| {
+        code_that_should_allocate_a_little();
     });
 
-    // Can also assert on a range, useful to adjust
-    // test expectations over time:
-    allocation_counter::assert_num_allocations(500..600 || {
-        code_that_should_not_allocate_much();
-    });
+    // Using a lower bound can help track behaviour over time:
+    assert!((500..600).contains(&info.count_total));
+    assert!((10_000..20_000).contains(&info.bytes_total));
+
+    // Limit peak memory usage:
+    assert!((100..200).contains(&info.count_max));
+    assert!((1_000..2_000).contains(&info.bytes_max));
+
+    // We don't want any leaks:
+    assert_eq!(0, info.count_current);
+    assert_eq!(0, info.bytes_current);
 
     // It's possible to opt out of counting allocations
     // for certain parts of the code flow:
-    allocation_counter::assert_no_allocations(|| {
+    let info = allocation_counter::measure(|| {
         code_that_should_not_allocate();
         allocation_counter::avoid_counting(|| {
             external_code_that_should_not_be_tested();
         });
         code_that_should_not_allocate();
     });
+    assert_eq!(0, info.count_total);
 }
 ```
 
