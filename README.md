@@ -53,7 +53,7 @@ pub fn no_memory_allocations() {
     // for certain parts of the code flow:
     let info = allocation_counter::measure(|| {
         code_that_should_not_allocate();
-        allocation_counter::avoid_counting(|| {
+        allocation_counter::opt_out(|| {
             external_code_that_should_not_be_tested();
         });
         code_that_should_not_allocate();

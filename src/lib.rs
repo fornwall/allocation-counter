@@ -58,7 +58,7 @@ assert_eq!(0, info.bytes_current);
 // for certain parts of the code flow:
 let info = allocation_counter::measure(|| {
     code_that_should_not_allocate();
-    allocation_counter::avoid_counting(|| {
+    allocation_counter::opt_out(|| {
         external_code_that_should_not_be_tested();
     });
     code_that_should_not_allocate();
@@ -133,7 +133,7 @@ impl std::ops::AddAssign for AllocationInfo {
 /// Will only measure those allocations done by the current thread, so take care
 /// when interpreting the returned count for multithreaded code.
 ///
-/// Use [avoid_counting()] to opt of of counting allocations temporarily.
+/// Use [opt_out()] to opt of of counting allocations temporarily.
 ///
 /// Nested `measure()` calls are supported up to a max depth of 64.
 ///
@@ -198,14 +198,14 @@ pub fn measure<F: FnOnce()>(run_while_measuring: F) -> AllocationInfo {
 /// # fn external_code_that_should_not_be_tested() {}
 /// let info = allocation_counter::measure(|| {
 ///     code_that_should_not_allocate();
-///     allocation_counter::avoid_counting(|| {
+///     allocation_counter::opt_out(|| {
 ///         external_code_that_should_not_be_tested();
 ///     });
 ///     code_that_should_not_allocate();
 /// });
 /// assert_eq!(info.count_total, 0);
 /// ```
-pub fn avoid_counting<F: FnOnce()>(run_while_not_counting: F) {
+pub fn opt_out<F: FnOnce()>(run_while_not_counting: F) {
     allocator::DO_COUNT.with(|b| {
         *b.borrow_mut() += 1;
         run_while_not_counting();
@@ -268,7 +268,7 @@ fn test_measure() {
 }
 
 #[test]
-fn test_avoid_counting() {
+fn test_opt_out() {
     let allocations = measure(|| {
         // Do nothing.
     });
@@ -277,10 +277,10 @@ fn test_avoid_counting() {
     let allocations = measure(|| {
         let v: Vec<u32> = vec![12];
         assert_eq!(v.len(), 1);
-        avoid_counting(|| {
+        opt_out(|| {
             let v: Vec<u32> = vec![12];
             assert_eq!(v.len(), 1);
-            avoid_counting(|| {
+            opt_out(|| {
                 let v: Vec<u32> = vec![12];
                 assert_eq!(v.len(), 1);
             });
@@ -293,7 +293,7 @@ fn test_avoid_counting() {
     assert_eq!(allocations.count_total, 3);
 
     let info = measure(|| {
-        avoid_counting(|| {
+        opt_out(|| {
             let v: Vec<u32> = vec![12];
             assert_eq!(v.len(), 1);
         });
