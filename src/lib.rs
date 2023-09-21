@@ -1,8 +1,12 @@
 /*!
 This crate provides a method to measure memory allocations while running some code.
 
+It can be used either exploratory (obtaining insights in how much memory allocations
+are being made), or as a tool to assert desired allocation behaviour in tests.
+
 # Usage
-Add as a dependency - since including the trait replaces the global memory allocator, you most likely want it gated behind a feature.
+Add as a dependency - since including the trait replaces the global memory allocator,
+you most likely want it gated behind a feature.
 
 ```toml
 [features]
