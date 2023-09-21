@@ -1,7 +1,7 @@
 /*!
-This crate provides a method to count and test the number of allocations while running some code.
+This crate provides a method to measure memory allocations while running some code.
 
-# Example
+# Usage
 Add as a dependency - since including the trait replaces the global memory allocator, you most likely want it gated behind a feature.
 
 ```toml
@@ -27,13 +27,32 @@ Tests can be conditional on the feature:
 
 The test code itself could look like:
 
-```
+```no_run
 # fn code_that_should_not_allocate() {}
+# fn code_that_should_allocate_a_little() {}
 # fn external_code_that_should_not_be_tested() {}
+// Verify that no memory allocations are made:
 let info = allocation_counter::measure(|| {
     code_that_should_not_allocate();
 });
 assert_eq!(info.count_total, 0);
+
+// Let's use a case where some allocations are expected.
+let info = allocation_counter::measure(|| {
+    code_that_should_allocate_a_little();
+});
+
+// Using a lower bound can help track behaviour over time:
+assert!((500..600).contains(&info.count_total));
+assert!((10_000..20_000).contains(&info.bytes_total));
+
+// Limit peak memory usage:
+assert!((100..200).contains(&info.count_max));
+assert!((1_000..2_000).contains(&info.bytes_max));
+
+// We don't want any leaks:
+assert_eq!(0, info.count_current);
+assert_eq!(0, info.bytes_current);
 
 // It's possible to opt out of counting allocations
 // for certain parts of the code flow:
