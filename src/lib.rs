@@ -12,45 +12,38 @@ count-allocations = ["allocation-counter"]
 allocation-counter = { version = "0", optional = true }
 ```
 
-Tests can now be written to assert that the number of desired memory allocations are not exceeded.
+The [measure()] function is now available, which can measure memory allocations made
+when the supplied function or closure runs.
+
+A test can be conditional on the feature:
 
 ```
 #[cfg(feature = "count-allocations")]
 #[test]
-pub fn no_memory_allocations() {
-    # fn code_that_should_not_allocate_memory() {}
-    # fn code_that_should_not_allocate_much() {}
-    let allocations = allocation_counter::count(|| {
-        code_that_should_not_allocate_memory();
-    });
-    assert_eq!(allocations, 0);
+# {}
+```
 
-    // Or use this utility method in this case:
-    allocation_counter::assert_no_allocations(|| {
-        code_that_should_not_allocate_memory();
-    });
+The test code itself could look like:
 
-    // Can also allow a certain number of allocations:
-    allocation_counter::assert_max_allocations(10 || {
-        code_that_should_not_allocate_much();
-    });
+```
+# fn code_that_should_not_allocate() {}
+# fn external_code_that_should_not_be_tested() {}
+// This is the workhorse method to obtain allocation information:
+let info = allocation_counter::measure(|| {
+    code_that_should_not_allocate();
+});
+assert_eq!(info.count_total, 0);
 
-    // Can also assert on a range, useful to adjust
-    // test expectations over time:
-    allocation_counter::assert_num_allocations(500..600 || {
-        code_that_should_not_allocate_much();
+// It's possible to opt out of counting allocations
+// for certain parts of the code flow:
+let info = allocation_counter::measure(|| {
+    code_that_should_not_allocate();
+    allocation_counter::avoid_counting(|| {
+        external_code_that_should_not_be_tested();
     });
-
-    // It's possible to opt out of counting allocations
-    // for certain parts of the code flow:
-    allocation_counter::assert_no_allocations(|| {
-        code_that_should_not_allocate();
-        allocation_counter::avoid_counting(|| {
-            external_code_that_should_not_be_tested();
-        });
-        code_that_should_not_allocate();
-    });
-}
+    code_that_should_not_allocate();
+});
+assert_eq!(0, info.count_total);
 ```
 
 Run the tests with the necessary feature enabled.
@@ -62,63 +55,87 @@ cargo test --features count-allocations
 
 pub(crate) mod allocator;
 
-#[derive(Clone, Copy, Default)]
+/// The allocation information obtained by a [measure()] call.
+#[derive(Clone, Copy, Default, Debug)]
 pub struct AllocationInfo {
-    num_allocations: u64,
-    total_bytes_allocated: u64,
-    current_bytes_allocated: i64,
-    max_bytes_allocated: u64,
-}
+    /// The total number of allocations made during a [measure()] call.
+    pub count_total: u64,
 
-impl AllocationInfo {
-    /// The number of allocations made during a [measure()] call.
-    pub const fn num_allocations(&self) -> u64 {
-        self.num_allocations
-    }
+    /// The current (net result) amount of allocations during a [measure()] call.
+    ///
+    /// A non-zero value of this field means that the function did not deallocate all allocations, as shown below.
+    ///
+    /// ```
+    /// let info = allocation_counter::measure(|| {
+    ///     let b = std::hint::black_box(Box::new(1_u32));
+    ///     std::mem::forget(b);
+    /// });
+    /// assert_eq!(info.count_current, 1);
+    /// ```
+    pub count_current: i64,
+
+    /// The max amount of allocations held during a point in time during a [measure()] call.
+    pub count_max: u64,
 
     /// The total amount of bytes allocated during a [measure()] call.
-    pub const fn total_bytes_allocated(&self) -> u64 {
-        self.total_bytes_allocated
-    }
+    pub bytes_total: u64,
 
     /// The current (net result) amount of bytes allocated during a [measure()] call.
     ///
-    /// This means that the function did not deallocate all memory.
+    /// A non-zero value of this field means that not all memory was deallocated, as shown below.
     ///
-    /// TODO: Add example
-    pub const fn current_bytes_allocated(&self) -> i64 {
-        self.current_bytes_allocated
-    }
+    /// ```
+    /// let info = allocation_counter::measure(|| {
+    ///     let b = std::hint::black_box(Box::new(1_u32));
+    ///     std::mem::forget(b);
+    /// });
+    /// assert_eq!(info.bytes_current, 4);
+    /// ```
+    pub bytes_current: i64,
 
     /// The max amount of bytes allocated at one time during a [measure()] call.
-    pub const fn max_bytes_allocated(&self) -> u64 {
-        self.max_bytes_allocated
+    pub bytes_max: u64,
+}
+
+impl std::ops::AddAssign for AllocationInfo {
+    fn add_assign(&mut self, other: Self) {
+        self.count_total += other.count_total;
+        self.count_current += other.count_current;
+        self.count_max += other.count_max;
+        self.bytes_total += other.bytes_total;
+        self.bytes_current += other.bytes_current;
+        self.bytes_max += other.bytes_max;
     }
 }
 
-/// Run a closure while counting the performed memory allocations.
+/// Run a closure or function while measuring the performed memory allocations.
 ///
-/// Will only measure those done by the current thread, so take care when
-/// interpreting the returned count for multithreaded code.
+/// Will only measure those allocations done by the current thread, so take care
+/// when interpreting the returned count for multithreaded code.
+///
+/// Use [avoid_counting()] to opt of of counting allocations temporarily.
+///
+/// Nested `measure()` calls are supported up to a max depth of 64.
 ///
 /// # Arguments
 ///
-/// - `run_while_counting` - The code to run while counting allocations
+/// - `run_while_measuring` - The code to run while measuring allocations
 ///
 /// # Examples
 ///
 /// ```
 /// # fn code_that_should_not_allocate_memory() {}
-/// let allocations = allocation_counter::count(|| {
+/// let info = allocation_counter::measure(|| {
 ///      "hello, world".to_string();
 /// });
-/// assert_eq!(allocations, 1);
+/// assert_eq!(info.count_total, 1);
+/// assert_eq!(info.count_current, 0);
+/// assert_eq!(info.count_max, 1);
+/// assert_eq!(info.bytes_total, 12);
+/// assert_eq!(info.bytes_current, 0);
+/// assert_eq!(info.bytes_max, 12);
 /// ```
-pub fn count<F: FnOnce()>(run_while_counting: F) -> u64 {
-    measure(run_while_counting).num_allocations()
-}
-
-pub fn measure<F: FnOnce()>(run_while_counting: F) -> AllocationInfo {
+pub fn measure<F: FnOnce()>(run_while_measuring: F) -> AllocationInfo {
     allocator::ALLOCATIONS.with(|info_stack| {
         let mut info_stack = info_stack.borrow_mut();
         info_stack.depth += 1;
@@ -130,7 +147,7 @@ pub fn measure<F: FnOnce()>(run_while_counting: F) -> AllocationInfo {
         info_stack.elements[depth as usize] = AllocationInfo::default();
     });
 
-    run_while_counting();
+    run_while_measuring();
 
     allocator::ALLOCATIONS.with(|info_stack| {
         let mut info_stack = info_stack.borrow_mut();
@@ -138,10 +155,7 @@ pub fn measure<F: FnOnce()>(run_while_counting: F) -> AllocationInfo {
         let popped = info_stack.elements[depth as usize];
         info_stack.depth -= 1;
         let depth = info_stack.depth as usize;
-        info_stack.elements[depth].num_allocations += popped.num_allocations;
-        info_stack.elements[depth].total_bytes_allocated += popped.total_bytes_allocated;
-        info_stack.elements[depth].current_bytes_allocated += popped.current_bytes_allocated;
-        info_stack.elements[depth].max_bytes_allocated += popped.max_bytes_allocated;
+        info_stack.elements[depth] += popped;
         popped
     })
 }
@@ -159,13 +173,14 @@ pub fn measure<F: FnOnce()>(run_while_counting: F) -> AllocationInfo {
 /// ```
 /// # fn code_that_should_not_allocate() {}
 /// # fn external_code_that_should_not_be_tested() {}
-/// allocation_counter::assert_no_allocations(|| {
+/// let info = allocation_counter::measure(|| {
 ///     code_that_should_not_allocate();
 ///     allocation_counter::avoid_counting(|| {
 ///         external_code_that_should_not_be_tested();
 ///     });
 ///     code_that_should_not_allocate();
 /// });
+/// assert_eq!(info.count_total, 0);
 /// ```
 pub fn avoid_counting<F: FnOnce()>(run_while_not_counting: F) {
     allocator::DO_COUNT.with(|b| {
@@ -175,217 +190,68 @@ pub fn avoid_counting<F: FnOnce()>(run_while_not_counting: F) {
     });
 }
 
-/// Run a closure and assert that no memory allocations were made.
-///
-/// Will only measure those done by the current thread, so take care when
-/// testing the memory allocations of multithreaded code.
-///
-/// # Arguments
-///
-/// - `run_while_counting` - The code to run while counting allocations
-///
-/// # Examples
-///
-/// ```
-/// # fn code_that_should_not_allocate_memory() {}
-/// allocation_counter::assert_no_allocations(|| {
-///     code_that_should_not_allocate_memory();
-/// });
-/// ```
-pub fn assert_no_allocations<F: FnOnce()>(run_while_counting: F) {
-    assert_max_allocations(0, run_while_counting);
-}
-
-/// Run a closure and assert that the number of memory allocations are below a limit.
-///
-/// Will only measure those done by the current thread, so take care when
-/// testing the memory allocations of multithreaded code.
-///
-/// # Arguments
-///
-/// - `max_allocations` - The maximum number of allocations allowed
-/// - `run_while_counting` - The code to run while counting allocations
-///
-/// # Examples
-///
-/// ```
-/// # fn code_that_should_not_allocate_much() {}
-/// allocation_counter::assert_max_allocations(12, || {
-///     code_that_should_not_allocate_much();
-/// });
-/// ```
-pub fn assert_max_allocations<F: FnOnce()>(max_allocations: u64, run_while_counting: F) {
-    let num_allocations = count(run_while_counting);
-    assert!(
-        num_allocations <= max_allocations,
-        "Unexpected memory allocations (more than {}): {}",
-        max_allocations,
-        num_allocations
-    );
-}
-
-/// Run a closure and assert that the number of memory allocations are inside a range.
-///
-/// Will only measure those done by the current thread, so take care when
-/// testing the memory allocations of multithreaded code.
-///
-/// # Arguments
-///
-/// - `allowed_allocations` - The range of allocations allowed
-/// - `run_while_counting` - The code to run while counting allocations
-///
-/// # Examples
-///
-/// ```
-/// # fn code_that_should_not_allocate_much() {}
-/// allocation_counter::assert_max_allocations(12, || {
-///     code_that_should_not_allocate_much();
-/// });
-/// ```
-pub fn assert_num_allocations<F: FnOnce()>(
-    allowed_allocations: std::ops::Range<u64>,
-    run_while_counting: F,
-) {
-    let num_allocations = count(run_while_counting);
-    assert!(
-        allowed_allocations.contains(&num_allocations),
-        "Unexpected memory allocations (outside of {:?}): {}",
-        allowed_allocations,
-        num_allocations
-    );
-}
-
 #[test]
-fn test_basic() {
-    let allocations = count(|| {
-        // Do nothing.
-    });
-    assert_eq!(allocations, 0);
-
+fn test_measure() {
     let info = measure(|| {
         // Do nothing.
     });
-    assert_eq!(info.num_allocations(), 0);
-    assert_eq!(info.total_bytes_allocated(), 0);
-    assert_eq!(info.current_bytes_allocated(), 0);
-
-    let allocations = count(|| {
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-    });
-    assert_eq!(allocations, 1);
-
-    let allocations = count(|| {
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-    });
-    assert_eq!(allocations, 1);
-
-    let allocations = count(|| {
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-    });
-    assert_eq!(allocations, 2);
+    assert_eq!(info.bytes_current, 0);
+    assert_eq!(info.bytes_total, 0);
+    assert_eq!(info.bytes_max, 0);
+    assert_eq!(info.count_current, 0);
+    assert_eq!(info.count_total, 0);
+    assert_eq!(info.count_max, 0);
 
     let info = measure(|| {
-        let _a = std::hint::black_box(Box::new(1_u32));
-        let _b = std::hint::black_box(Box::new(1_u32));
+        {
+            let _a = std::hint::black_box(Box::new(1_u32));
+        }
+        {
+            let _b = std::hint::black_box(Box::new(1_u32));
+        }
     });
-    assert_eq!(info.num_allocations(), 2);
-    assert_eq!(info.total_bytes_allocated(), 8);
-    assert_eq!(info.current_bytes_allocated(), 0);
+    assert_eq!(info.bytes_current, 0);
+    assert_eq!(info.bytes_total, 8);
+    assert_eq!(info.bytes_max, 4);
+    assert_eq!(info.count_current, 0);
+    assert_eq!(info.count_total, 2);
+    assert_eq!(info.count_max, 1);
 
     let info = measure(|| {
-        let _a = std::hint::black_box(Box::new(1_u32));
+        {
+            let _a = std::hint::black_box(Box::new(1_u32));
+        }
         let b = std::hint::black_box(Box::new(1_u32));
         std::mem::forget(b);
     });
-    assert_eq!(info.num_allocations(), 2);
-    assert_eq!(info.total_bytes_allocated(), 8);
-    assert_eq!(info.current_bytes_allocated(), 4);
-    assert_eq!(info.max_bytes_allocated, 8);
+    assert_eq!(info.bytes_current, 4);
+    assert_eq!(info.bytes_total, 8);
+    assert_eq!(info.bytes_max, 4);
+    assert_eq!(info.count_current, 1);
+    assert_eq!(info.count_total, 2);
+    assert_eq!(info.count_max, 1);
 
     let info = measure(|| {
         let a = std::hint::black_box(Box::new(1_u32));
         let b = std::hint::black_box(Box::new(1_u32));
         let _c = std::hint::black_box(Box::new(*a + *b));
     });
-    assert_eq!(info.num_allocations(), 3);
-    assert_eq!(info.total_bytes_allocated(), 12);
-    assert_eq!(info.current_bytes_allocated(), 0);
-    assert_eq!(info.max_bytes_allocated, 12);
-
-    assert_no_allocations(|| {
-        // Do nothing
-    });
-
-    assert_max_allocations(2, || {
-        // Do nothing
-    });
-
-    assert_max_allocations(2, || {
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-    });
-
-    assert_num_allocations(1..3, || {
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-    });
-
-    assert_num_allocations(2..3, || {
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-    });
-}
-
-#[test]
-#[should_panic(expected = "Unexpected memory allocations (more than 0): 1")]
-fn test_assert_no_allocations_panic() {
-    assert_no_allocations(|| {
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-    });
-}
-
-#[test]
-#[should_panic(expected = "Unexpected memory allocations (more than 1): 2")]
-fn test_assert_max_allocations_panic() {
-    assert_max_allocations(1, || {
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-    });
-}
-
-#[test]
-#[should_panic(expected = "Unexpected memory allocations (outside of 10..12): 2")]
-fn test_assert_num_allocations_panic() {
-    assert_num_allocations(10..12, || {
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-        let v: Vec<u32> = vec![12];
-        assert_eq!(v.len(), 1);
-    });
+    assert_eq!(info.bytes_current, 0);
+    assert_eq!(info.bytes_total, 12);
+    assert_eq!(info.bytes_max, 12);
+    assert_eq!(info.count_current, 0);
+    assert_eq!(info.count_total, 3);
+    assert_eq!(info.count_max, 3);
 }
 
 #[test]
 fn test_avoid_counting() {
-    let allocations = count(|| {
+    let allocations = measure(|| {
         // Do nothing.
     });
-    assert_eq!(allocations, 0);
+    assert_eq!(allocations.count_total, 0);
 
-    let allocations = count(|| {
+    let allocations = measure(|| {
         let v: Vec<u32> = vec![12];
         assert_eq!(v.len(), 1);
         avoid_counting(|| {
@@ -401,14 +267,15 @@ fn test_avoid_counting() {
         let v: Vec<u32> = vec![12];
         assert_eq!(v.len(), 1);
     });
-    assert_eq!(allocations, 3);
+    assert_eq!(allocations.count_total, 3);
 
-    assert_no_allocations(|| {
+    let info = measure(|| {
         avoid_counting(|| {
             let v: Vec<u32> = vec![12];
             assert_eq!(v.len(), 1);
         });
     });
+    assert_eq!(0, info.count_total);
 }
 
 #[test]
@@ -418,11 +285,17 @@ fn test_nested_counting() {
         let info = measure(|| {
             let _b = std::hint::black_box(Box::new(1_u32));
         });
-        assert_eq!(info.num_allocations(), 1);
-        assert_eq!(info.total_bytes_allocated(), 4);
-        assert_eq!(info.current_bytes_allocated(), 0);
+        assert_eq!(info.bytes_current, 0);
+        assert_eq!(info.bytes_total, 4);
+        assert_eq!(info.bytes_max, 4);
+        assert_eq!(info.count_current, 0);
+        assert_eq!(info.count_total, 1);
+        assert_eq!(info.count_max, 1);
     });
-    assert_eq!(info.num_allocations(), 2);
-    assert_eq!(info.total_bytes_allocated(), 8);
-    assert_eq!(info.current_bytes_allocated(), 0);
+    assert_eq!(info.bytes_current, 0);
+    assert_eq!(info.bytes_total, 8);
+    assert_eq!(info.bytes_max, 8);
+    assert_eq!(info.count_current, 0);
+    assert_eq!(info.count_total, 2);
+    assert_eq!(info.count_max, 2);
 }

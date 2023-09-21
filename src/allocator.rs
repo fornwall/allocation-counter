@@ -1,7 +1,7 @@
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 
-pub const MAX_DEPTH: usize = 32;
+pub const MAX_DEPTH: usize = 64;
 
 pub struct AllocationInfoStack {
     pub depth: u32,
@@ -28,13 +28,16 @@ unsafe impl GlobalAlloc for CountingAllocator {
                     let mut info_stack = info_stack.borrow_mut();
                     let depth = info_stack.depth;
                     let info = &mut info_stack.elements[depth as usize];
-                    info.num_allocations += 1;
-                    info.total_bytes_allocated += l.size() as u64;
-                    info.current_bytes_allocated += l.size() as i64;
-                    if info.current_bytes_allocated > 0 {
-                        info.max_bytes_allocated = info
-                            .max_bytes_allocated
-                            .max(info.current_bytes_allocated as u64);
+
+                    info.count_total += 1;
+                    info.count_current += 1;
+                    if info.count_current > 0 {
+                        info.count_max = info.count_max.max(info.count_current as u64);
+                    }
+                    info.bytes_total += l.size() as u64;
+                    info.bytes_current += l.size() as i64;
+                    if info.bytes_current > 0 {
+                        info.bytes_max = info.bytes_max.max(info.bytes_current as u64);
                     }
                 });
             }
@@ -50,7 +53,8 @@ unsafe impl GlobalAlloc for CountingAllocator {
                     let mut info_stack = info_stack.borrow_mut();
                     let depth = info_stack.depth;
                     let info = &mut info_stack.elements[depth as usize];
-                    info.current_bytes_allocated -= l.size() as i64;
+                    info.count_current -= 1;
+                    info.bytes_current -= l.size() as i64;
                 });
             }
         });
