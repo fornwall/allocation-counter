@@ -66,23 +66,31 @@ pub(crate) mod allocator;
 pub struct AllocationInfo {
     num_allocations: u64,
     total_bytes_allocated: u64,
-    max_bytes_allocated: u64,
     current_bytes_allocated: i64,
+    max_bytes_allocated: u64,
 }
 
 impl AllocationInfo {
+    /// The number of allocations made during a [measure()] call.
     pub const fn num_allocations(&self) -> u64 {
         self.num_allocations
     }
 
+    /// The total amount of bytes allocated during a [measure()] call.
     pub const fn total_bytes_allocated(&self) -> u64 {
         self.total_bytes_allocated
     }
 
+    /// The current (net result) amount of bytes allocated during a [measure()] call.
+    ///
+    /// This means that the function did not deallocate all memory.
+    ///
+    /// TODO: Add example
     pub const fn current_bytes_allocated(&self) -> i64 {
         self.current_bytes_allocated
     }
 
+    /// The max amount of bytes allocated at one time during a [measure()] call.
     pub const fn max_bytes_allocated(&self) -> u64 {
         self.max_bytes_allocated
     }
